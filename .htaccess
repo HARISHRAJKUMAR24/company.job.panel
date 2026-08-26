@@ -1,0 +1,22 @@
+RewriteEngine On
+RewriteBase /company.job.panel/
+
+# Remove .php extension from URL (only for GET requests)
+RewriteCond %{THE_REQUEST} \s/+manager\.job\.panel/(.+?)\.php[\s?] [NC]
+RewriteCond %{REQUEST_METHOD} GET
+RewriteRule ^(.+)\.php$ /company.job.panel/$1 [R=301,L]
+
+# If request is not a file or folder
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# Load .php automatically
+RewriteRule ^(.+)$ $1.php [L,QSA]
+
+# Default homepage
+RewriteRule ^$ index.php [L]
+
+# Don't rewrite AJAX POST requests
+RewriteCond %{REQUEST_URI} ^/manager\.job\.panel/ajax/
+RewriteCond %{REQUEST_METHOD} POST
+RewriteRule ^ - [L]
