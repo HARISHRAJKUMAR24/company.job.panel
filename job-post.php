@@ -3,7 +3,7 @@ require_once './config/config.php';
 
 // Check if logged in as company
 if (!isCompanyLoggedIn()) {
-    header("Location: " . APP_URL . "login.php");
+     header("Location: " . APP_URL . "auth.php");
     exit();
 }
 
