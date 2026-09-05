@@ -15,8 +15,8 @@
         <ul class="nav flex-column gap-0">
             <li><a href="<?= url('index.php') ?>" class="nav-link active"><i class="bi bi-grid-fill"></i> Dashboard</a></li>
             <li><a href="job-post" class="nav-link"><i class="bi bi-briefcase"></i> Jobs <span class="badge-count">12</span></a></li>
-            <li><a href="#" class="nav-link"><i class="bi bi-file-earmark-text"></i> Applications <span class="badge-count">24</span></a></li>
-            <li><a href="#" class="nav-link"><i class="bi bi-people"></i> Candidates</a></li>
+            <li><a href="applications.php" class="nav-link"><i class="bi bi-file-earmark-text"></i> Applications <span class="badge-count">24</span></a></li>
+            <li><a href="candidates" class="nav-link"><i class="bi bi-people"></i> Candidates</a></li>
                         <!-- Subscriptions - credit card icon (already using) -->
             <li><a href="subscriptions" class="nav-link"><i class="bi bi-credit-card-fill me-3"></i> Subscriptions</a></li>
         </ul>

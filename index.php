@@ -10,13 +10,133 @@ if (!isCompanyLoggedIn() || !verifyCompanyToken($pdo)) {
 $company = getCompanyData($pdo, $_SESSION['company_id']);
 $company_name = $company['company_name'] ?? 'Company';
 $company_id = $company['company_id'] ?? '';
+$company_db_id = $company['id'] ?? 0;
+
+// Get dashboard statistics from database
+$stats = [
+    'total_jobs' => 0,
+    'total_applications' => 0,
+    'total_candidates' => 0,
+    'views_today' => 0,
+    'pending_applications' => 0,
+    'shortlisted_applications' => 0,
+    'rejected_applications' => 0,
+    'hired_applications' => 0
+];
+
+try {
+    // Get total jobs
+    $stmt = $pdo->prepare("SELECT COUNT(*) as total FROM jobs_post WHERE company_id = ? AND status != 'deleted'");
+    $stmt->execute([$company_db_id]);
+    $stats['total_jobs'] = $stmt->fetchColumn() ?: 0;
+
+    // Get total applications
+    $stmt = $pdo->prepare("SELECT COUNT(*) as total FROM job_applications WHERE company_id = ?");
+    $stmt->execute([$company_db_id]);
+    $stats['total_applications'] = $stmt->fetchColumn() ?: 0;
+
+    // Get total unique candidates
+    $stmt = $pdo->prepare("SELECT COUNT(DISTINCT applicant_email) as total FROM job_applications WHERE company_id = ?");
+    $stmt->execute([$company_db_id]);
+    $stats['total_candidates'] = $stmt->fetchColumn() ?: 0;
+
+    // Get applications by status
+    $statuses = ['pending', 'reviewed', 'shortlisted', 'rejected', 'hired'];
+    foreach ($statuses as $status) {
+        $stmt = $pdo->prepare("SELECT COUNT(*) as total FROM job_applications WHERE company_id = ? AND status = ?");
+        $stmt->execute([$company_db_id, $status]);
+        $stats[$status . '_applications'] = $stmt->fetchColumn() ?: 0;
+    }
+
+    // Get today's views (jobs posted today)
+    $stmt = $pdo->prepare("SELECT COUNT(*) as total FROM jobs_post WHERE company_id = ? AND DATE(created_at) = CURDATE()");
+    $stmt->execute([$company_db_id]);
+    $stats['views_today'] = $stmt->fetchColumn() ?: 0;
+
+} catch (PDOException $e) {
+    error_log("Error fetching stats: " . $e->getMessage());
+}
+
+// Get recent applications with job details
+$recent_applications = [];
+try {
+    $stmt = $pdo->prepare("
+        SELECT 
+            a.*,
+            j.job_title,
+            c.company_name
+        FROM job_applications a
+        INNER JOIN jobs_post j ON a.job_id = j.id
+        INNER JOIN companies c ON a.company_id = c.id
+        WHERE a.company_id = ?
+        ORDER BY a.applied_at DESC
+        LIMIT 5
+    ");
+    $stmt->execute([$company_db_id]);
+    $recent_applications = $stmt->fetchAll();
+} catch (PDOException $e) {
+    error_log("Error fetching recent applications: " . $e->getMessage());
+}
+
+// Helper function for status badge
+function getStatusBadge($status) {
+    $badges = [
+        'pending' => 'bg-warning bg-opacity-10 text-warning',
+        'reviewed' => 'bg-info bg-opacity-10 text-info',
+        'shortlisted' => 'bg-success bg-opacity-10 text-success',
+        'rejected' => 'bg-danger bg-opacity-10 text-danger',
+        'hired' => 'bg-success bg-opacity-10 text-success'
+    ];
+    return $badges[$status] ?? 'bg-secondary bg-opacity-10 text-secondary';
+}
+
+// Helper function for status label
+function getStatusLabel($status) {
+    $labels = [
+        'pending' => 'Pending',
+        'reviewed' => 'Reviewed',
+        'shortlisted' => 'Shortlisted',
+        'rejected' => 'Rejected',
+        'hired' => 'Hired'
+    ];
+    return $labels[$status] ?? ucfirst($status);
+}
+
+// Helper function for time ago
+function timeAgo($timestamp) {
+    $time_diff = time() - strtotime($timestamp);
+    if ($time_diff < 60) return 'Just now';
+    if ($time_diff < 3600) return floor($time_diff / 60) . 'm ago';
+    if ($time_diff < 86400) return floor($time_diff / 3600) . 'h ago';
+    if ($time_diff < 604800) return floor($time_diff / 86400) . 'd ago';
+    if ($time_diff < 2592000) return floor($time_diff / 604800) . 'w ago';
+    return date('M d, Y', strtotime($timestamp));
+}
+
+// Get initials for avatar
+function getInitials($name) {
+    $words = explode(' ', $name);
+    $initials = '';
+    foreach ($words as $word) {
+        if (!empty($word)) {
+            $initials .= strtoupper(substr($word, 0, 1));
+        }
+    }
+    return substr($initials, 0, 2);
+}
+
+// Get color for avatar
+function getAvatarColor($name) {
+    $colors = ['primary', 'warning', 'success', 'danger', 'info', 'secondary'];
+    $index = abs(crc32($name)) % count($colors);
+    return $colors[$index];
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
-    <?php
-    require_once './templates/head.php'  ?>
+    <?php require_once './templates/head.php'; ?>
 </head>
 
 <body>
@@ -42,7 +162,7 @@ $company_id = $company['company_id'] ?? '';
                 </div>
                 <button class="btn btn-light btn-sm rounded-circle position-relative" style="width: 38px; height: 38px; border-color: #e9ecef;">
                     <i class="bi bi-bell"></i>
-                    <span class="position-absolute top-0 start-100 translate-middle badge rounded-circle bg-danger" style="font-size: 0.55rem; padding: 0.2rem 0.35rem;">5</span>
+                    <span class="position-absolute top-0 start-100 translate-middle badge rounded-circle bg-danger" style="font-size: 0.55rem; padding: 0.2rem 0.35rem;"><?= $stats['pending_applications'] ?></span>
                 </button>
                 <div class="dropdown d-none d-sm-block">
                     <button class="btn btn-light btn-sm d-flex align-items-center gap-2" data-bs-toggle="dropdown" style="border-color: #e9ecef; padding: 0.3rem 1rem;">
@@ -78,7 +198,7 @@ $company_id = $company['company_id'] ?? '';
                     <div class="stat-card-modern d-flex align-items-center gap-3">
                         <div class="stat-icon purple flex-shrink-0"><i class="bi bi-briefcase-fill"></i></div>
                         <div>
-                            <div class="stat-value">24</div>
+                            <div class="stat-value"><?= $stats['total_jobs'] ?></div>
                             <div class="stat-label">Total Jobs</div>
                         </div>
                     </div>
@@ -87,7 +207,7 @@ $company_id = $company['company_id'] ?? '';
                     <div class="stat-card-modern d-flex align-items-center gap-3">
                         <div class="stat-icon blue flex-shrink-0"><i class="bi bi-file-earmark-text-fill"></i></div>
                         <div>
-                            <div class="stat-value">156</div>
+                            <div class="stat-value"><?= $stats['total_applications'] ?></div>
                             <div class="stat-label">Applications</div>
                         </div>
                     </div>
@@ -96,7 +216,7 @@ $company_id = $company['company_id'] ?? '';
                     <div class="stat-card-modern d-flex align-items-center gap-3">
                         <div class="stat-icon green flex-shrink-0"><i class="bi bi-people-fill"></i></div>
                         <div>
-                            <div class="stat-value">43</div>
+                            <div class="stat-value"><?= $stats['total_candidates'] ?></div>
                             <div class="stat-label">Candidates</div>
                         </div>
                     </div>
@@ -105,8 +225,8 @@ $company_id = $company['company_id'] ?? '';
                     <div class="stat-card-modern d-flex align-items-center gap-3">
                         <div class="stat-icon orange flex-shrink-0"><i class="bi bi-eye-fill"></i></div>
                         <div>
-                            <div class="stat-value">892</div>
-                            <div class="stat-label">Views Today</div>
+                            <div class="stat-value"><?= $stats['views_today'] ?></div>
+                            <div class="stat-label">Jobs Today</div>
                         </div>
                     </div>
                 </div>
@@ -119,51 +239,50 @@ $company_id = $company['company_id'] ?? '';
                         <div class="card-body p-4">
                             <div class="d-flex justify-content-between align-items-center mb-3">
                                 <h6 class="fw-bold mb-0" style="color: #1e293b;">Recent Applications</h6>
-                                <a href="#" class="text-decoration-none small">View All <i class="bi bi-arrow-right"></i></a>
+                                <a href="applications.php" class="text-decoration-none small">View All <i class="bi bi-arrow-right"></i></a>
                             </div>
                             <div class="table-responsive">
-                                <table class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
-                                    <thead>
-                                        <tr>
-                                            <th>Applicant</th>
-                                            <th>Position</th>
-                                            <th>Status</th>
-                                            <th>Date</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr>
-                                            <td>
-                                                <div class="d-flex align-items-center gap-2">
-                                                    <div class="rounded-circle bg-primary bg-opacity-10 text-primary d-flex align-items-center justify-content-center" style="width: 30px; height: 30px; font-weight: 600; font-size: 0.7rem;">JD</div>John Doe
-                                                </div>
-                                            </td>
-                                            <td>Senior Developer</td>
-                                            <td><span class="badge bg-success bg-opacity-10 text-success">Shortlisted</span></td>
-                                            <td>Today</td>
-                                        </tr>
-                                        <tr>
-                                            <td>
-                                                <div class="d-flex align-items-center gap-2">
-                                                    <div class="rounded-circle bg-warning bg-opacity-10 text-warning d-flex align-items-center justify-content-center" style="width: 30px; height: 30px; font-weight: 600; font-size: 0.7rem;">JS</div>Jane Smith
-                                                </div>
-                                            </td>
-                                            <td>UI/UX Designer</td>
-                                            <td><span class="badge bg-warning bg-opacity-10 text-warning">Pending</span></td>
-                                            <td>Yesterday</td>
-                                        </tr>
-                                        <tr>
-                                            <td>
-                                                <div class="d-flex align-items-center gap-2">
-                                                    <div class="rounded-circle bg-danger bg-opacity-10 text-danger d-flex align-items-center justify-content-center" style="width: 30px; height: 30px; font-weight: 600; font-size: 0.7rem;">MR</div>Mike Ross
-                                                </div>
-                                            </td>
-                                            <td>Product Manager</td>
-                                            <td><span class="badge bg-danger bg-opacity-10 text-danger">Rejected</span></td>
-                                            <td>3 days ago</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
+                                <?php if (empty($recent_applications)): ?>
+                                    <div class="text-center py-4">
+                                        <i class="bi bi-inbox" style="font-size: 2rem; color: #d1d5db;"></i>
+                                        <p class="text-muted mt-2" style="font-size: 0.85rem;">No applications yet</p>
+                                    </div>
+                                <?php else: ?>
+                                    <table class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
+                                        <thead>
+                                            <tr>
+                                                <th>Applicant</th>
+                                                <th>Position</th>
+                                                <th>Status</th>
+                                                <th>Date</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach ($recent_applications as $app): ?>
+                                                <?php
+                                                    $initials = getInitials($app['applicant_name']);
+                                                    $color = getAvatarColor($app['applicant_name']);
+                                                    $status_badge = getStatusBadge($app['status']);
+                                                    $status_label = getStatusLabel($app['status']);
+                                                    $time_ago = timeAgo($app['applied_at']);
+                                                ?>
+                                                <tr>
+                                                    <td>
+                                                        <div class="d-flex align-items-center gap-2">
+                                                            <div class="rounded-circle bg-<?= $color ?> bg-opacity-10 text-<?= $color ?> d-flex align-items-center justify-content-center" style="width: 30px; height: 30px; font-weight: 600; font-size: 0.7rem;">
+                                                                <?= $initials ?>
+                                                            </div>
+                                                            <?= htmlspecialchars($app['applicant_name']) ?>
+                                                        </div>
+                                                    </td>
+                                                    <td><?= htmlspecialchars($app['job_title']) ?></td>
+                                                    <td><span class="badge <?= $status_badge ?>"><?= $status_label ?></span></td>
+                                                    <td><?= $time_ago ?></td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                <?php endif; ?>
                             </div>
                         </div>
                     </div>
@@ -173,18 +292,18 @@ $company_id = $company['company_id'] ?? '';
                         <div class="card-body p-4">
                             <h6 class="fw-bold mb-3" style="color: #1e293b;">Quick Actions</h6>
                             <div class="d-grid gap-2">
-                                <button class="btn btn-primary d-flex align-items-center gap-2" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; justify-content: center; border-radius: 12px;">
+                                <a href="post-job.php" class="btn btn-primary d-flex align-items-center gap-2" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; justify-content: center; border-radius: 12px;">
                                     <i class="bi bi-plus-circle"></i> Post New Job
-                                </button>
-                                <button class="btn btn-outline-primary d-flex align-items-center gap-2" style="border-color: #e9ecef; justify-content: flex-start; border-radius: 12px;">
-                                    <i class="bi bi-file-earmark-plus"></i> Create Category
-                                </button>
-                                <button class="btn btn-outline-primary d-flex align-items-center gap-2" style="border-color: #e9ecef; justify-content: flex-start; border-radius: 12px;">
-                                    <i class="bi bi-envelope-plus"></i> Send Newsletter
-                                </button>
-                                <button class="btn btn-outline-primary d-flex align-items-center gap-2" style="border-color: #e9ecef; justify-content: flex-start; border-radius: 12px;">
-                                    <i class="bi bi-download"></i> Export Data
-                                </button>
+                                </a>
+                                <a href="jobs.php" class="btn btn-outline-primary d-flex align-items-center gap-2" style="border-color: #e9ecef; justify-content: flex-start; border-radius: 12px;">
+                                    <i class="bi bi-briefcase"></i> Manage Jobs
+                                </a>
+                                <a href="candidates.php" class="btn btn-outline-primary d-flex align-items-center gap-2" style="border-color: #e9ecef; justify-content: flex-start; border-radius: 12px;">
+                                    <i class="bi bi-people"></i> View Candidates
+                                </a>
+                                <a href="subscription-plans.php" class="btn btn-outline-primary d-flex align-items-center gap-2" style="border-color: #e9ecef; justify-content: flex-start; border-radius: 12px;">
+                                    <i class="bi bi-box"></i> Subscription Plans
+                                </a>
                             </div>
                         </div>
                     </div>
